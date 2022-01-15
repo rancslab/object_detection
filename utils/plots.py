@@ -82,7 +82,7 @@ class Annotator:
             self.im = im
         self.lw = line_width or max(round(sum(im.shape) / 2 * 0.003), 2)  # line width
 
-    def box_label(self, box, label='', color=(128, 128, 128), txt_color=(255, 255, 255)):
+    def box_label(self, box, poi, label='', dist=0, color=(128, 128, 128), txt_color=(255, 255, 255)):
         # Add one xyxy box to image with label
         if self.pil or not is_ascii(label):
             self.draw.rectangle(box, width=self.lw, outline=color)  # box
@@ -97,15 +97,49 @@ class Annotator:
                 self.draw.text((box[0], box[1] - h if outside else box[1]), label, fill=txt_color, font=self.font)
         else:  # cv2
             p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
-            cv2.rectangle(self.im, p1, p2, color, thickness=self.lw, lineType=cv2.LINE_AA)
-            if label:
-                tf = max(self.lw - 1, 1)  # font thickness
-                w, h = cv2.getTextSize(label, 0, fontScale=self.lw / 3, thickness=tf)[0]  # text width, height
-                outside = p1[1] - h - 3 >= 0  # label fits outside box
-                p2 = p1[0] + w, p1[1] - h - 3 if outside else p1[1] + h + 3
-                cv2.rectangle(self.im, p1, p2, color, -1, cv2.LINE_AA)  # filled
-                cv2.putText(self.im, label, (p1[0], p1[1] - 2 if outside else p1[1] + h + 2), 0, self.lw / 3, txt_color,
+
+            txt_x = int((p1[0] + p2[0]) / 2)
+            txt_y = int(p1[1])
+
+            dist_reading = str(round(dist,2))
+            tf = max(self.lw - 1, 1)  # font thickness
+            cv2.putText(self.im, dist_reading+' m', (txt_x, txt_y), 0, self.lw / 3, txt_color,
                             thickness=tf, lineType=cv2.LINE_AA)
+
+            if dist > 1.8: 
+                cv2.rectangle(self.im, p1, p2, color=(0,255,0), thickness=self.lw, lineType=cv2.LINE_AA)
+            else:
+                cv2.rectangle(self.im, p1, p2, color, thickness=self.lw, lineType=cv2.LINE_AA)
+
+
+            
+            #outside = p1[1] - h - 3 >= 0  # label fits outside box
+            #p2 = p1[0] + w, p1[1] - h - 3 if outside else p1[1] + h + 3
+
+            #cv2.putText(self.im, str(dist), (center_point_x, center_point_y), 0, self.lw / 3, txt_color,
+            #                thickness=tf, lineType=cv2.LINE_AA)
+                #cv2.rectangle(self.im, p1, p2, color, -1, cv2.LINE_AA)  # filled
+                #cv2.putText(self.im, label, (p1[0], p1[1] - 2 if outside else p1[1] + h + 2), 0, self.lw / 3, txt_color,
+                            #thickness=tf, lineType=cv2.LINE_AA)
+
+                ########### Fisher's code ################
+                
+                ##########################################
+            #cv2.circle(self.im, (center_point_x, center_point_y), radius=3, color=(0, 0, 255), thickness=-1)
+            #cv2.circle(self.im, (poi[1], poi[0]), radius=3, color=(0, 0, 255), thickness=-1)
+            ##########################################
+            #if label:
+            #    tf = max(self.lw - 1, 1)  # font thickness
+            #    w, h = cv2.getTextSize(label, 0, fontScale=self.lw / 3, thickness=tf)[0]  # text width, height
+            #    outside = p1[1] - h - 3 >= 0  # label fits outside box
+            #    p2 = p1[0] + w, p1[1] - h - 3 if outside else p1[1] + h + 3
+                #cv2.rectangle(self.im, p1, p2, color, -1, cv2.LINE_AA)  # filled
+                #cv2.putText(self.im, label, (p1[0], p1[1] - 2 if outside else p1[1] + h + 2), 0, self.lw / 3, txt_color,
+                            #thickness=tf, lineType=cv2.LINE_AA)
+
+                ########### Fisher's code ################
+            #    
+                ##########################################
 
     def rectangle(self, xy, fill=None, outline=None, width=1):
         # Add rectangle to image (PIL-only)
@@ -132,7 +166,7 @@ def feature_visualization(x, module_type, stage, n=32, save_dir=Path('runs/detec
     if 'Detect' not in module_type:
         batch, channels, height, width = x.shape  # batch, channels, height, width
         if height > 1 and width > 1:
-            f = save_dir / f"stage{stage}_{module_type.split('.')[-1]}_features.png"  # filename
+            f = f"stage{stage}_{module_type.split('.')[-1]}_features.png"  # filename
 
             blocks = torch.chunk(x[0].cpu(), channels, dim=0)  # select batch index 0, block by channels
             n = min(n, channels)  # number of plots
@@ -143,10 +177,9 @@ def feature_visualization(x, module_type, stage, n=32, save_dir=Path('runs/detec
                 ax[i].imshow(blocks[i].squeeze())  # cmap='gray'
                 ax[i].axis('off')
 
-            print(f'Saving {f}... ({n}/{channels})')
-            plt.savefig(f, dpi=300, bbox_inches='tight')
+            print(f'Saving {save_dir / f}... ({n}/{channels})')
+            plt.savefig(save_dir / f, dpi=300, bbox_inches='tight')
             plt.close()
-            np.save(str(f.with_suffix('.npy')), x[0].cpu().numpy())  # npy save
 
 
 def hist2d(x, y, n=100):

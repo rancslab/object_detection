@@ -2,26 +2,14 @@
 """
 Run inference on images, videos, directories, streams, etc.
 
-Usage - sources:
-    $ python path/to/detect.py --weights yolov5s.pt --source 0              # webcam
-                                                             img.jpg        # image
-                                                             vid.mp4        # video
-                                                             path/          # directory
-                                                             path/*.jpg     # glob
+Usage:
+    $ python path/to/detect.py --weights yolov5s.pt --source 0  # webcam
+                                                             img.jpg  # image
+                                                             vid.mp4  # video
+                                                             path/  # directory
+                                                             path/*.jpg  # glob
                                                              'https://youtu.be/Zgi9g1ksQHc'  # YouTube
                                                              'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP stream
-
-Usage - formats:
-    $ python path/to/detect.py --weights yolov5s.pt                 # PyTorch
-                                         yolov5s.torchscript        # TorchScript
-                                         yolov5s.onnx               # ONNX Runtime or OpenCV DNN with --dnn
-                                         yolov5s.xml                # OpenVINO
-                                         yolov5s.engine             # TensorRT
-                                         yolov5s.mlmodel            # CoreML (MacOS-only)
-                                         yolov5s_saved_model        # TensorFlow SavedModel
-                                         yolov5s.pb                 # TensorFlow GraphDef
-                                         yolov5s.tflite             # TensorFlow Lite
-                                         yolov5s_edgetpu.tflite     # TensorFlow Edge TPU
 """
 
 import argparse
@@ -50,8 +38,7 @@ from utils.torch_utils import select_device, time_sync
 @torch.no_grad()
 def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         source=ROOT / 'data/images',  # file/dir/URL/glob, 0 for webcam
-        data=ROOT / 'data/coco128.yaml',  # dataset.yaml path
-        imgsz=(640, 640),  # inference size (height, width)
+        imgsz=640,  # inference size (pixels)
         conf_thres=0.25,  # confidence threshold
         iou_thres=0.45,  # NMS IOU threshold
         max_det=1000,  # maximum detections per image
@@ -76,6 +63,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         dnn=False,  # use OpenCV DNN for ONNX inference
         ):
     source = str(source)
+    is_pcap = source.endswith('.pcap')
+
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
     is_url = source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
@@ -89,28 +78,104 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
     # Load model
     device = select_device(device)
-    model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data)
-    stride, names, pt, jit, onnx, engine = model.stride, model.names, model.pt, model.jit, model.onnx, model.engine
+    model = DetectMultiBackend(weights, device=device, dnn=dnn)
+    stride, names, pt, jit, onnx = model.stride, model.names, model.pt, model.jit, model.onnx
     imgsz = check_img_size(imgsz, s=stride)  # check image size
 
     # Half
-    half &= (pt or jit or onnx or engine) and device.type != 'cpu'  # FP16 supported on limited backends with CUDA
-    if pt or jit:
+    half &= pt and device.type != 'cpu'  # half precision only supported by PyTorch on CUDA
+    if pt:
         model.model.half() if half else model.model.float()
 
     # Dataloader
-    if webcam:
-        view_img = check_imshow()
-        cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt)
-        bs = len(dataset)  # batch_size
-    else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
+    if is_pcap:
+        print('pcap file')
+        
+        from ouster import client
+        metadata_path = 'sample.json'
+        with open(metadata_path, 'r') as f:
+            metadata = client.SensorInfo(f.read())
+
+        from ouster import pcap
+        pcap_file = pcap.Pcap(source, metadata)
+
+        from contextlib import closing
+
+        import numpy as np
+        width = 1024
+        height = 128
+
+        import ffmpeg
+        import subprocess
+        out_file = "out.mp4" 
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logging.basicConfig(level=logging.INFO)
+
+        def start_ffmpeg_process2(out_filename, width, height):
+            logger.info('Starting ffmpeg process2')
+            args = (
+                ffmpeg
+                #.input('pipe:', format='rawvideo', pix_fmt='rgb24', s='{}x{}'.format(width, height))
+                .input('pipe:', format='rawvideo', framerate='10', pix_fmt='gray', s='{}x{}'.format(width, height))
+                .output(out_filename, pix_fmt='yuv420p', framerate='10')
+                .overwrite_output()
+                .compile()
+                #.run()
+            )
+            return subprocess.Popen(args, stdin=subprocess.PIPE)
+
+
+        def write_frame(process2, frame):
+            logger.debug('Writing frame')
+            process2.stdin.write(
+                frame
+                .astype(np.uint8)
+                .tobytes()
+            )
+
+        with closing(client.Scans(pcap_file)) as scans:
+            process2 = start_ffmpeg_process2(out_file, width, height)
+
+            for scan in scans:
+                ref_field = scan.field(client.ChanField.REFLECTIVITY)
+                ref_val = client.destagger(pcap_file.metadata, ref_field)
+                ref_img = (ref_val / np.max(ref_val) * 255).astype(np.uint8)
+
+                range_field = scan.field(client.ChanField.RANGE)
+                range_val = client.destagger(pcap_file.metadata, range_field)
+                range_img = (range_val / np.max(range_val) * 255).astype(np.uint8)
+
+                empty_layer = np.zeros(ref_img.shape, dtype=np.uint8)
+
+                combined_img = np.dstack((ref_img, range_img, empty_layer))
+
+                xyzlut = client.XYZLut(metadata)
+                xyz_destaggered = client.destagger(metadata, xyzlut(scan))
+
+                write_frame(process2, ref_img)
+
+            process2.stdin.close()
+            process2.wait()        
+
+        dataset = LoadImages(out_file, img_size=imgsz, stride=stride, auto=pt and not jit)
         bs = 1  # batch_size
     vid_path, vid_writer = [None] * bs, [None] * bs
 
+    #if webcam:
+    #    view_img = check_imshow()
+    #    cudnn.benchmark = True  # set True to speed up constant image size inference
+    #    dataset = Load(source, img_size=imgsz, stride=stride, auto=pt and not jit)
+    #    bs = len(dataset)  # batch_size
+    #else:
+    #    dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt and not jit)
+    #    bs = 1  # batch_size
+    #vid_path, vid_writer = [None] * bs, [None] * bs
+
     # Run inference
-    model.warmup(imgsz=(1, 3, *imgsz), half=half)  # warmup
+    if pt and device.type != 'cpu':
+        model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.model.parameters())))  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0
     for path, im, im0s, vid_cap, s in dataset:
         t1 = time_sync()
@@ -136,6 +201,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
         # Process predictions
+
         for i, det in enumerate(pred):  # per image
             seen += 1
             if webcam:  # batch_size >= 1
@@ -146,7 +212,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # im.jpg
-            txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
+            #txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
+            txt_path = str(save_dir / 'labels' / p.stem) 
             s += '%gx%g ' % im.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
@@ -155,6 +222,11 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
 
+                poi_list = []
+                xyz_list = []
+                xyxy_list = []
+                range_list = []
+
                 # Print results
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
@@ -162,19 +234,68 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                    xyxy_list.append(xyxy)
+
+                    #if save_txt:  # Write to file
+                    #    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    #    line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+                    #    with open(txt_path + '.txt', 'a') as f:
+                    #        f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                        annotator.box_label(xyxy, label, color=colors(c, True))
+                        ##################Fisher#######################
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        x1 = int(xyxy[0])
+                        y1 = int(xyxy[1])
+                        x2 = int(xyxy[2])
+                        y2 = int(xyxy[3])
+
+                        range_roi = range_val[int(xyxy[1]):int(xyxy[3]), int(xyxy[0]):int(xyxy[2])] #whole box
+                        range_roi[np.where(range_roi==0)] = 8000 #add a big number to zero range                      
+                        
+                        min_range = np.min(range_roi) #average of a portion of points
+                        range_list.append(min_range)
+
+                        poi_roi = np.unravel_index(range_roi.argmin(), range_roi.shape) #(y,x) in roi
+                        poi_x = poi_roi[1] + x1
+                        poi_y = poi_roi[0] + y1
+                        poi = (poi_y, poi_x) #(y,x) in global
+                        poi_list.append(poi)
+                        
+                        xyz_val = xyz_destaggered[poi]
+                        xyz_list.append(xyz_val)
+                    
+                        ###############################################
                         if save_crop:
                             save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
 
+                #print('poi_list: ', poi_list)
+
+                import csv
+                if save_txt:
+                    csv_file = open(txt_path + '.csv', 'a', newline='')
+                    writer = csv.writer(csv_file)
+
+                if len(poi_list) < 2: 
+                    print('just 1 object')
+                    if save_txt:  # Write to file
+                        writer.writerow([1, 0, 0])
+                else:
+                    xyz_1 = xyz_list[0]
+                    xyz_2 = xyz_list[1]
+
+                    import math
+                    dist = math.sqrt((xyz_1[0] - xyz_2[0])**2 + (xyz_1[1] - xyz_2[1])**2 + (xyz_1[2] - xyz_2[2])**2)
+                    print(('dist: ', dist))
+
+                    annotator.box_label(xyxy_list[0], poi_list[0], label, dist, color=colors(c, True))
+                    annotator.box_label(xyxy_list[1], poi_list[1], label, dist, color=colors(c, True))
+
+                    if save_txt:  # Write to file
+                        writer.writerow([2, dist, 1 if dist < 1.8 else 0])
+                    
             # Print time (inference-only)
             LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
 
@@ -217,7 +338,6 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)')
     parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
