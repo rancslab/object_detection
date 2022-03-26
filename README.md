@@ -2,14 +2,14 @@
 Our goal is to identify persons with an [OS0-128](https://ouster.com/products/scanning-lidar/os0-sensor/) lidar sensor and trigger an alarm when the relative distance between the two people is less than 1.8 meters. Detailed instructions can be found in the blog post **Object Detection and Tracking using Deep Learning and Ouster Python SDK**
 
 ## Install
-Clone repo and install required packages in a [Python>=3.7.0](https://www.python.org/) environment, including [PyTorch>=1.7](https://pytorch.org/get-started/locally/). 
+1. Clone repo and install required packages in a [Python>=3.7.0](https://www.python.org/) environment, including [PyTorch>=1.7](https://pytorch.org/get-started/locally/). 
 ```
 git clone https://github.com/fisher-jianyu-shi/yolov5_Ouster-lidar-example 
 cd yolov5_Ouster-lidar-example 
 pip install -r requirements.txt  
 ```
 
-install the Ouster Python SDK (more details [here](https://static.ouster.dev/sdk-docs/installation.html))  
+2. Install the Ouster Python SDK (more details [here](https://static.ouster.dev/sdk-docs/installation.html))  
 ```
 python3 -m pip install --upgrade pip
 ```
