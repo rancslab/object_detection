@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python3 -m pip install --upgrade pip
 ```
 
-sample lidar data can be found in [Ouster Data App](https://data.ouster.dev/drive/20048) (please download both the pcap and joson files)
+3. Download the [sample lidar data](https://data.ouster.dev/drive/20048) (please download both the pcap and joson files)
 
 ## Inference with detect.py
 `detect.py` (from original [YOLOv5 repo](https://github.com/ultralytics/yolov5)) runs inference on a variety of sources (images, videos, video streams, webcam, etc.) and saves results to `runs/detect`  
