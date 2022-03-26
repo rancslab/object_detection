@@ -26,7 +26,7 @@ python detect.py --class 0 --weights Yolov5s.pt --conf-thres=0.4 --source exampl
 This will automatically save the results in the directory `runs/detect/exp` as an annotated image with a label and the confidence levels of the prediction. 
 
 ## Inference with detect_pcap.py
-To run inference on a pcap file using custom-trained weights, simply run:
+To run inference on lidar data (pcap file) using custom-trained weights, simply run:
 ```
 python detect_pcap.py --class 0 --weights best.pt --conf-thres=0.4 --source Ouster-YOLOv5-sample.pcap --metadata-path Ouster-YOLOv5-sample.json  --view-img
 ```
