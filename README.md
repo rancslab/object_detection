@@ -32,5 +32,5 @@ python detect_pcap.py --class 0 --weights best.pt --conf-thres=0.4 --source Oust
 ```
 To calculate the relative distance between two people:
 ```
-python detect_PCAP.py --class 0 --weights best.pt --conf-thres=0.4 --source Ouster-YOLOv5-sample.PCAP --metadata-path Ouster-YOLOv5-sample.JSON  --view-img --social-distance
+python detect_PCAP.py --class 0 --weights best.pt --conf-thres=0.4 --source Ouster-YOLOv5-sample.pcap --metadata-path Ouster-YOLOv5-sample.json  --view-img --social-distance
 ```
