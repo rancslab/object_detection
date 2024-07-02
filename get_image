@@ -1,0 +1,22 @@
+import cv2
+import numpy as np
+from contextlib import closing
+from ouster import client
+from ouster import pcap
+
+with open(metadata_path, 'r') as f:  
+    metadata = client.SensorInfo(f.read())
+
+source = pcap.Pcap(pcap_path, metadata)
+
+counter = 0
+
+with closing(client.Scans(source)) as scans:  
+    for scan in scans:
+        counter += 1 
+        ref_field = scan.field(client.ChanField.REFLECTIVITY)
+        ref_val = client.destagger(source.metadata, ref_field)
+        ref_img = ref_val.astype(np.uint8)
+
+        filename = 'extract'+str(counter)+'.jpg'    
+        cv2.imwrite(img_path+filename, ref_img)
